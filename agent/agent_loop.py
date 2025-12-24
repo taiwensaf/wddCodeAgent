@@ -43,6 +43,14 @@ def solve(requirement: str, model_name: str = "qwen2.5-coder:7b", max_iterations
         
         tasks = plan_result.get("tasks", [])
         project_name = plan_result.get("project_name", "project")
+        
+        # 确保项目名称符合 Python 文件命名规范
+        import re
+        project_name = re.sub(r'[^\w\s-]', '', project_name)  # 移除特殊字符
+        project_name = re.sub(r'[-\s]+', '_', project_name)   # 空格和横线替换为下划线
+        project_name = project_name.lower()                    # 转小写
+        if not project_name:
+            project_name = "project"
     else:
         # 如果不规划，则创建一个默认任务
         project_name = "project"
@@ -57,6 +65,7 @@ def solve(requirement: str, model_name: str = "qwen2.5-coder:7b", max_iterations
     # 步骤2: 遍历所有任务，生成代码
     task_modules = []
     all_code_results = {}
+    accumulated_code = ""  # 累积已生成的代码作为上下文
     
     for idx, task in enumerate(tasks):
         print(f"\n[TASK {idx+1}/{len(tasks)}] 处理任务: {task.get('name', 'Unknown')}")
@@ -64,6 +73,10 @@ def solve(requirement: str, model_name: str = "qwen2.5-coder:7b", max_iterations
         
         task_name = task.get("name", f"Task{idx}")
         task_desc = f"任务: {task_name}\n说明: {task.get('description', '')}"
+        
+        # 如果有多个任务且不是第一个，传入已生成的代码作为上下文
+        if len(tasks) > 1 and accumulated_code:
+            task_desc += f"\n\n【已生成的代码】\n{accumulated_code}\n\n【注意】请生成与上述代码不同的、互补的模块，不要重复实现相同的函数或类。"
         
         # 为每个任务生成代码
         code_result = code_generate(requirement, task_desc, model_name)
@@ -82,6 +95,9 @@ def solve(requirement: str, model_name: str = "qwen2.5-coder:7b", max_iterations
                 "code": code,
                 "filename": code_data.get("filename", f"{task_name}.py")
             })
+            
+            # 累积代码供下一个任务参考
+            accumulated_code += f"\n# {task_name}\n{code}\n"
             
         except json.JSONDecodeError:
             print(f"[WARNING] 无法解析任务 {task_name} 的代码生成结果")
@@ -103,7 +119,7 @@ def solve(requirement: str, model_name: str = "qwen2.5-coder:7b", max_iterations
         filename = f"{project_name}.py"
         
         print("\n[INFO] 为汇总项目生成测试...")
-        test_result = generate_tests(aggregated_code, filename, model_name)
+        test_result = generate_tests(aggregated_code, filename, model_name, source_dir="results/generated_code")
         test_data = json.loads(test_result)
         
         if test_data.get("status") == "success":
@@ -130,7 +146,7 @@ def solve(requirement: str, model_name: str = "qwen2.5-coder:7b", max_iterations
                         print(f"[INFO] 第 {iteration+1} 次修复完成")
                         
                         # 重新运行测试
-                        test_result = generate_tests(fixed_code, filename, model_name)
+                        test_result = generate_tests(fixed_code, filename, model_name, source_dir="results/generated_code")
                         test_data = json.loads(test_result)
                         test_exec_result = save_and_run_tests(test_result)
                         all_results["tests"] = test_exec_result
