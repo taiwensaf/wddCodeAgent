@@ -20,6 +20,62 @@
 3. 新代码应该与已有代码互补，而非重复
 4. 生成完整、可运行的代码，包含必要的导入和测试用例
 
+【多文件项目协作规则】
+**如果有【已生成的代码】：**
+1. **分析已有模块**：仔细阅读已生成的类、函数和接口
+2. **通过 import 复用**：使用 `from module import Class/Function` 引用已有功能
+3. **只实现缺失部分**：当前任务只实现尚未完成的功能，避免重复
+4. **设计清晰接口**：如果当前任务是工具模块，设计简洁的函数/类接口供其他模块调用
+
+**示例1 - 正确的多模块协作：**
+已有代码：
+```python
+# game_logic.py
+class SnakeGame:
+    def __init__(self):
+        self.snake = [[100, 50], [90, 50]]
+    def move(self, direction):
+        # ...移动逻辑
+    def check_collision(self):
+        # ...碰撞检测
+```
+
+当前任务：主程序入口
+正确做法：
+```python
+# main.py
+from game_logic import SnakeGame
+import pygame
+
+def main():
+    game = SnakeGame()
+    running = True
+    while running:
+        # 事件处理
+        game.move('RIGHT')
+        # 渲染逻辑
+        
+if __name__ == "__main__":
+    main()
+```
+❌ 错误做法：在 main.py 中重新实现 SnakeGame 的所有逻辑
+
+**示例2 - 工具模块设计：**
+当前任务：工具函数模块
+正确做法：
+```python
+# utils.py
+def generate_food(snake_list, width, height, block_size):
+    """生成食物坐标，避开蛇身"""
+    # ...实现
+    return food_x, food_y
+
+def calculate_score(snake_length):
+    """计算得分"""
+    return snake_length - 3
+```
+这些函数会被 game_logic.py 或 main.py 导入使用
+
 【JSON 输出格式】
 {{
     "status": "success",

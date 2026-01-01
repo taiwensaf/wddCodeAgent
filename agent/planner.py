@@ -32,7 +32,10 @@ def plan(requirement: str, model_name: str = "qwen2.5-coder:7b") -> dict:
     )
     
     result = client.generate(prompt, response_format="json")
-    
+    # with open("result.json", "w", encoding="utf-8") as f: # 保存规划结果以供调试
+    #     json.dump(result, f, ensure_ascii=False, indent=2)
+
+
     try:
         plan_data = json.loads(result)
         print(f"[INFO] 项目: {plan_data.get('project_name', 'N/A')}")

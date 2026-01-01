@@ -18,14 +18,14 @@
 4. 然后编写测试函数
 
 【输出格式】
-{{
+{{{{
     "status": "success",
     "test_filename": "test_<对应文件名>.py",
     "test_code": "<完整的pytest测试代码，包含正确的导入语句>",
     "test_cases": [
-        {{"name": "test_xxx", "description": "测试描述"}}
+        {{{{"name": "test_xxx", "description": "测试描述"}}}}
     ]
-}}
+}}}}
 
 【测试要求】
 1. 使用 pytest 框架
