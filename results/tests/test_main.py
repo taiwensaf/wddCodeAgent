@@ -1,34 +1,56 @@
 import sys
-import os
-
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(os.path.dirname(current_dir))
-source_path = os.path.join(project_root, 'results/generated_code/calculator')
-sys.path.insert(0, source_path)
-
+import pathlib
+THIS_DIR = pathlib.Path(__file__).resolve().parent
+SRC_DIR = pathlib.Path(r'E:\研一（上）\LLM_Course\wddCodeAgent\wddCodeAgent\wddCodeAgent\results\generated_code\project').resolve()
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 from main import *
 
 import pytest
 
-@pytest.mark.parametrize('num1, num2, operator, expected', [
-    (5, 3, '+', 8),
-    (5, 3, '-', 2),
-    (5, 3, '*', 15),
-    (5, 3, '/', 1.67),
-    (0, 5, '+', 5),
-    (-5, 5, '-', -10),
-    (5, 0, '/', 'Division by zero'),
-    (5, 3, '^', 'Invalid operator')
+@pytest.mark.parametrize('n, expected', [
+    (0, 1),
+    (5, [1, 2, 6, 24, 15]),
+    (-1, 'Input must be a non-negative integer'),
+    ('a', 'Input must be a non-negative integer'),
+    (3.5, 'Input must be a non-negative integer')
 ])
-def test_calculator(num1, num2, operator, expected):
-    if isinstance(expected, str) and 'Division by zero' in expected:
+def test_factorial(n, expected):
+    if isinstance(expected, str):
         with pytest.raises(ValueError) as exc_info:
-            calculator(num1, num2, operator)
-        assert str(exc_info.value) == 'Division by zero'
-    elif isinstance(expected, str) and 'Invalid operator' in expected:
-        with pytest.raises(ValueError) as exc_info:
-            calculator(num1, num2, operator)
-        assert str(exc_info.value) == 'Invalid operator'
+            factorial(n)
+        assert str(exc_info.value) == expected
     else:
-        result = calculator(num1, num2, operator)
-        assert result == expected
+        assert factorial(n) == expected
+
+@pytest.mark.parametrize('n, expected', [
+    (0, 0),
+    (5, 15),
+    (-1, 'Input must be a non-negative integer'),
+    ('a', 'Input must be a non-negative integer'),
+    (3.5, 'Input must be a non-negative integer')
+])
+def test_sum_to_n(n, expected):
+    if isinstance(expected, str):
+        with pytest.raises(ValueError) as exc_info:
+            sum_to_n(n)
+        assert str(exc_info.value) == expected
+    else:
+        assert sum_to_n(n) == expected
+
+@pytest.mark.parametrize('n, expected', [
+    (0, []),
+    (1, [1]),
+    (2, [1, 2]),
+    (3, [1, 2, 6]),
+    (-1, 'Input must be a non-negative integer'),
+    ('a', 'Input must be a non-negative integer'),
+    (3.5, 'Input must be a non-negative integer')
+])
+def test_f(n, expected):
+    if isinstance(expected, str):
+        with pytest.raises(ValueError) as exc_info:
+            f(n)
+        assert str(exc_info.value) == expected
+    else:
+        assert f(n) == expected

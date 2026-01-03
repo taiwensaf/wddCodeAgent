@@ -2,6 +2,7 @@
 Agent主循环 - 整合规划、编码、测试、调试模块
 """
 import json
+from typing import Optional
 from agent.planner import plan
 from agent.coder import code_generate, code_save, code_aggregate, code_save_multi_file, code_save_aggregated
 from agent.tester import generate_tests, save_and_run_tests
@@ -9,7 +10,21 @@ from agent.debugger import debug_code
 import re
 import pathlib
 
-def solve(requirement: str, model_name: str = "qwen2.5-coder:7b", max_iterations: int = 3, enable_plan: bool = True):
+
+def _sanitize_project_name(name: str) -> str:
+    """Normalize project name to a safe filesystem/package name."""
+    name = re.sub(r'[\W]+', '_', name)  # 非字母数字下划线替换为下划线
+    name = re.sub(r'_+', '_', name).strip('_').lower()
+    return name or "project"
+
+
+def solve(
+    requirement: str,
+    model_name: str = "qwen2.5-coder:7b",
+    max_iterations: int = 3,
+    enable_plan: bool = True,
+    project_name: Optional[str] = None,
+):
     """
     完整的代码生成工作流
     
@@ -37,6 +52,7 @@ def solve(requirement: str, model_name: str = "qwen2.5-coder:7b", max_iterations
     
     # 步骤1: 需求规划
     tasks = []
+    project_name_sanitized = None
     if enable_plan:
         plan_result = plan(requirement, model_name)
         all_results["plan"] = plan_result
@@ -45,18 +61,12 @@ def solve(requirement: str, model_name: str = "qwen2.5-coder:7b", max_iterations
             return all_results
         
         tasks = plan_result.get("tasks", [])
-        project_name = plan_result.get("project_name", "project")
-        
-        # 确保项目名称符合 Python 文件命名规范
-        project_name = re.sub(r'[^\w\s-]', '', project_name)  # 移除特殊字符
-        project_name = re.sub(r'[-\s]+', '_', project_name)   # 空格和横线替换为下划线
-        project_name = project_name.lower()                    # 转小写
-        if not project_name:
-            project_name = "project"
+        derived_name = plan_result.get("project_name", "project")
+        project_name_sanitized = _sanitize_project_name(project_name or derived_name)
     else:
         # 如果不规划，则创建一个默认任务
-        project_name = "project"
         tasks = [{"name": "Main", "description": requirement}]
+        project_name_sanitized = _sanitize_project_name(project_name or "project")
     
     if not tasks:
         print("[ERROR] 没有任务可执行")
@@ -71,8 +81,9 @@ def solve(requirement: str, model_name: str = "qwen2.5-coder:7b", max_iterations
     accumulated_code = ""  # 累积已生成的代码作为上下文，供后续任务参考
     
     for idx, task in enumerate(tasks):
-        print(f"\n[TASK {idx+1}/{len(tasks)}] 处理任务: {task.get('name', 'Unknown')}")
-        print("-" * 50)
+        print(f"\n{'='*60}")
+        print(f"📋 [TASK {idx+1}/{len(tasks)}] {task.get('name', 'Unknown')}")
+        print(f"{'='*60}")
         
         task_name = task.get("name", f"Task{idx}")
         # 合并全局需求与当前任务描述，提供完整上下文
@@ -100,6 +111,16 @@ def solve(requirement: str, model_name: str = "qwen2.5-coder:7b", max_iterations
             
             # 提取代码
             code = code_data.get("code", "")
+            
+            # 清理可能的 markdown 代码块标记
+            code = code.strip()
+            if code.startswith("```python"):
+                code = code[len("```python"):].lstrip()
+            elif code.startswith("```"):
+                code = code[3:].lstrip()
+            if code.endswith("```"):
+                code = code[:-3].rstrip()
+            
             task_modules.append({
                 "task_name": task_name,
                 "code": code,
@@ -118,14 +139,14 @@ def solve(requirement: str, model_name: str = "qwen2.5-coder:7b", max_iterations
         return all_results
     
     # 步骤2.5: 汇总所有代码（多文件结构）
-    file_dict = code_aggregate(task_modules, project_name)
-    saved_files = code_save_multi_file(file_dict, project_name)
+    file_dict = code_aggregate(task_modules, project_name_sanitized)
+    saved_files = code_save_multi_file(file_dict, project_name_sanitized)
     
     print(f"\n[SUCCESS] 项目已保存 {len(saved_files)} 个文件")
     all_results["generated_code"] = file_dict
     all_results["generated_files"] = saved_files
     
-    project_dir = f"results/generated_code/{project_name}"
+    project_dir = f"results/generated_code/{project_name_sanitized}"
     
     # 步骤3: 为所有文件生成并运行测试
     print("\n[INFO] 开始为所有文件生成测试...")
@@ -135,7 +156,9 @@ def solve(requirement: str, model_name: str = "qwen2.5-coder:7b", max_iterations
                   if f.endswith(".py") and not f.startswith("test_") and f != "__init__.py"]
     
     for file_name in test_files:
-        print(f"\n[TEST] 为 {file_name} 生成测试...")
+        print(f"\n{'─'*60}")
+        print(f"🧪 [TEST] 为 {file_name} 生成测试...")
+        print(f"{'─'*60}")
         file_code = file_dict[file_name]
         current_code = file_code
         
@@ -151,12 +174,38 @@ def solve(requirement: str, model_name: str = "qwen2.5-coder:7b", max_iterations
                 continue
             
             # 执行测试
-            test_exec_result = save_and_run_tests(test_result, source_dir=project_dir)
+            test_exec_result = save_and_run_tests(
+                test_result,
+                source_dir=project_dir,
+                default_test_filename=f"test_{pathlib.Path(file_name).stem}.py",
+            )
             all_results["file_tests"][file_name] = test_exec_result
+            
+            # 显示测试文件路径
+            if "test_file" in test_exec_result:
+                print(f"📁 测试文件: {test_exec_result['test_file']}")
+            
+            # 显示测试结果详情
+            status = test_exec_result.get('status')
+            status_icon = "✅" if status == "success" else "❌"
+            print(f"{status_icon} 测试状态: {status}")
+            
+            if "summary" in test_exec_result:
+                summary = test_exec_result["summary"]
+                print(f"📊 测试摘要:")
+                print(f"   • 收集: {summary.get('collected', 0)} 项")
+                print(f"   • 通过: {summary.get('passed', 0)}")
+                print(f"   • 失败: {summary.get('failed', 0)}")
+                print(f"   • 错误: {summary.get('errors', 0)}")
             
             # 如果测试失败，进入调试循环
             if test_exec_result.get("status") == "failed":
-                print(f"\n[DEBUG] {file_name} 测试失败，开始调试...")
+                print(f"\n{'🔧'*20}")
+                print(f"🐛 [DEBUG] {file_name} 测试失败，开始调试...")
+                print(f"{'🔧'*20}")
+                print(f"\n📝 测试输出:\n{'-'*50}\n{test_exec_result.get('stdout_tail', '(无输出)')}")
+                if test_exec_result.get('stderr'):
+                    print(f"\n⚠️  错误输出:\n{'-'*50}\n{test_exec_result.get('stderr', '(无错误)')}")
                 
                 for iteration in range(max_iterations):
                     error_msg = (
@@ -165,13 +214,13 @@ def solve(requirement: str, model_name: str = "qwen2.5-coder:7b", max_iterations
                     ).strip()
                     
                     if not error_msg:
-                        print(f"[INFO] {file_name} 未找到错误信息，停止调试")
+                        print(f"ℹ️  {file_name} 未找到错误信息，停止调试")
                         break
                     
                     # 检查不可调试错误
                     fatal_patterns = ["ModuleNotFoundError", "SyntaxError", "IndentationError"]
                     if any(p in error_msg for p in fatal_patterns):
-                        print(f"[WARNING] {file_name} 检测到致命错误，终止调试")
+                        print(f"⚠️  {file_name} 检测到致命错误，终止调试")
                         break
                     
                     # 调用debugger，传入完整上下文
@@ -180,7 +229,7 @@ def solve(requirement: str, model_name: str = "qwen2.5-coder:7b", max_iterations
                     try:
                         debug_data = json.loads(debug_result)
                     except json.JSONDecodeError:
-                        print(f"[WARNING] 无法解析 {file_name} 的调试结果")
+                        print(f"⚠️  无法解析 {file_name} 的调试结果")
                         break
                     
                     all_results["debug_history"].append({
@@ -192,12 +241,12 @@ def solve(requirement: str, model_name: str = "qwen2.5-coder:7b", max_iterations
                     })
                     
                     if debug_data.get("status") != "success":
-                        print(f"[WARNING] {file_name} Debugger 无法修复，终止调试")
+                        print(f"⚠️  {file_name} Debugger 无法修复，终止调试")
                         break
                     
                     fixed_code = debug_data.get("fixed_code", "")
                     if not fixed_code:
-                        print(f"[WARNING] {file_name} 无法获取修复后的代码")
+                        print(f"⚠️  {file_name} 无法获取修复后的代码")
                         break
                     
                     # 更新文件
@@ -206,7 +255,7 @@ def solve(requirement: str, model_name: str = "qwen2.5-coder:7b", max_iterations
                         with open(file_path, "w", encoding="utf-8") as f:
                             f.write(fixed_code)
                         current_code = fixed_code
-                        print(f"[INFO] {file_name} 第 {iteration+1} 次修复完成")
+                        print(f"\n🔨 第 {iteration+1} 次修复完成")
                         
                         # 重新测试
                         test_result = generate_tests(fixed_code, file_name, model_name, source_dir=project_dir)
@@ -214,41 +263,74 @@ def solve(requirement: str, model_name: str = "qwen2.5-coder:7b", max_iterations
                         test_exec_result = save_and_run_tests(test_result, source_dir=project_dir)
                         all_results["file_tests"][file_name] = test_exec_result
                         
+                        # 显示测试文件路径
+                        if "test_file" in test_exec_result:
+                            print(f"[INFO] 测试文件已保存到: {test_exec_result['test_file']}")
+                        
                         if test_exec_result.get("status") == "success":
-                            print(f"[SUCCESS] {file_name} 所有测试通过！")
+                            print(f"\n🎉 {file_name} 所有测试通过！")
                             break
                     
                     if iteration == max_iterations - 1:
-                        print(f"[WARNING] {file_name} 达到最大调试次数，停止调试")
+                        print(f"\n⚠️  {file_name} 达到最大调试次数 ({max_iterations})，停止调试")
             else:
-                print(f"[SUCCESS] {file_name} 测试通过")
+                print(f"\n✨ {file_name} 测试通过")
         
         except json.JSONDecodeError:
-            print(f"[WARNING] 无法解析 {file_name} 的测试生成结果")
+            print(f"⚠️  无法解析 {file_name} 的测试生成结果")
             all_results["file_tests"][file_name] = {"status": "error", "reason": "JSON parse error"}
     
     # 步骤4: 汇总测试结果
-    print("\n" + "=" * 50)
-    print("[SUMMARY] 测试结果汇总")
-    print("=" * 50)
+    print("\n" + "═" * 60)
+    print("📊 测试结果汇总")
+    print("═" * 60)
     
     passed_files = [f for f, result in all_results["file_tests"].items() 
                     if result.get("status") == "success"]
     failed_files = [f for f, result in all_results["file_tests"].items() 
                     if result.get("status") == "failed"]
     
-    print(f"✓ 通过: {len(passed_files)}/{len(test_files)} 个文件")
+    total_rate = f"{len(passed_files)}/{len(test_files)}"
+    print(f"\n✅ 通过: {total_rate} 个文件")
     if passed_files:
         for f in passed_files:
-            print(f"  - {f}")
+            print(f"   ✓ {f}")
     
     if failed_files:
-        print(f"✗ 失败: {len(failed_files)}/{len(test_files)} 个文件")
+        print(f"\n❌ 失败: {len(failed_files)}/{len(test_files)} 个文件")
         for f in failed_files:
-            print(f"  - {f}")
+            print(f"   ✗ {f}")
     
-    print("=" * 50)
-    print("[AGENT] 工作流完成")
-    print("=" * 50)
+    print("\n" + "═" * 60)
+    if len(passed_files) == len(test_files):
+        print("🎊 所有测试通过！工作流完成")
+    else:
+        print("⚠️  工作流完成（部分测试未通过）")
+    print("═" * 60)
+    print("📊 测试结果汇总")
+    print("═" * 60)
+    
+    passed_files = [f for f, result in all_results["file_tests"].items() 
+                    if result.get("status") == "success"]
+    failed_files = [f for f, result in all_results["file_tests"].items() 
+                    if result.get("status") == "failed"]
+    
+    total_rate = f"{len(passed_files)}/{len(test_files)}"
+    print(f"\n✅ 通过: {total_rate} 个文件")
+    if passed_files:
+        for f in passed_files:
+            print(f"   ✓ {f}")
+    
+    if failed_files:
+        print(f"\n❌ 失败: {len(failed_files)}/{len(test_files)} 个文件")
+        for f in failed_files:
+            print(f"   ✗ {f}")
+    
+    print("\n" + "═" * 60)
+    if len(passed_files) == len(test_files):
+        print("🎊 所有测试通过！工作流完成")
+    else:
+        print("⚠️  工作流完成（部分测试未通过）")
+    print("═" * 60)
     
     return all_results

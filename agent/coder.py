@@ -297,6 +297,20 @@ def code_save_multi_file(file_dict: dict, project_name: str = "project", save_di
         
         saved_files = {}
         
+        # 自动创建 __init__.py（如果不存在）使项目成为可导入的包
+        if "__init__.py" not in file_dict:
+            # 收集所有 .py 文件的模块名（排除 __init__.py 和测试文件）
+            modules = [f.replace(".py", "") for f in file_dict.keys() 
+                      if f.endswith(".py") and not f.startswith("test_")]
+            if modules:
+                # 生成导入语句
+                imports = "\n".join([f"from .{mod} import *" for mod in modules])
+                init_path = project_path / "__init__.py"
+                with open(init_path, "w", encoding="utf-8") as f:
+                    f.write(imports + "\n")
+                saved_files["__init__.py"] = str(init_path)
+                print(f"[INFO] ✓ __init__.py (auto-generated) saved to {init_path}")
+        
         # 保存每个文件
         for filename, code in file_dict.items():
             file_path = project_path / filename
