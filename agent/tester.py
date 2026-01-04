@@ -81,6 +81,10 @@ def generate_tests(
     pm = PromptManager()
     module_name = pathlib.Path(filename).stem
     source_dir_path = pathlib.Path(source_dir) if source_dir else pathlib.Path(".")
+    
+    # 分析源代码中的函数签名，识别参数和返回值
+    analysis = _analyze_source_code(source_code)
+    
     prompt = pm.get(
         "tester",
         filename=filename,
@@ -89,9 +93,40 @@ def generate_tests(
         module_name=module_name,
         import_setup=_build_import_setup(source_dir_path, module_name),
     )
+    
+    # 添加代码分析上下文，帮助 Tester 更准确地理解
+    enhanced_prompt = (
+        prompt + "\n\n【代码分析】\n"
+        f"函数列表: {', '.join(analysis['functions'])}\n"
+        f"类列表: {', '.join(analysis['classes'])}\n"
+        f"处理异常: {'是' if analysis['handles_exceptions'] else '否'}\n"
+        f"\n请根据实际源代码内容生成测试，不要凭空想象。"
+    )
 
     client = LLMClient(model_name=model_name, temperature=0.2, max_tokens=2048)
-    return client.generate(prompt, response_format="json")
+    return client.generate(enhanced_prompt, response_format="json")
+
+
+def _analyze_source_code(source_code: str) -> dict:
+    """Analyze source code to extract function/class definitions and exception handling."""
+    analysis = {
+        "functions": [],
+        "classes": [],
+        "handles_exceptions": False
+    }
+    
+    # 提取函数定义
+    func_pattern = r'def\s+(\w+)\s*\('
+    analysis["functions"] = re.findall(func_pattern, source_code)
+    
+    # 提取类定义
+    class_pattern = r'class\s+(\w+)\s*[\(:]'
+    analysis["classes"] = re.findall(class_pattern, source_code)
+    
+    # 检查是否有异常处理
+    analysis["handles_exceptions"] = 'raise ' in source_code or 'try:' in source_code
+    
+    return analysis
 
 
 def save_and_run_tests(

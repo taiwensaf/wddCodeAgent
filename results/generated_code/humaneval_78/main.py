@@ -1,0 +1,6 @@
+def hex_key(num):
+    prime_hex_digits = {'2', '3', '5', '7', 'B', 'D'}
+    return sum(1 for digit in num.upper() if digit in prime_hex_digits)
+
+# Test cases
+assert hex_key('123456789ABCDEF') == 4

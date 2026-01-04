@@ -1,0 +1,14 @@
+def find_max(words):
+    if not words:
+        return ''
+
+    max_unique_chars = 0
+    result_word = ''
+
+    for word in words:
+        unique_chars = len(set(word))
+        if unique_chars > max_unique_chars or (unique_chars == max_unique_chars and word < result_word):
+            max_unique_chars = unique_chars
+            result_word = word
+
+    return result_word

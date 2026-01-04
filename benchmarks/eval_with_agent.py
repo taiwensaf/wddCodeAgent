@@ -305,12 +305,22 @@ def run_all(
                 for sample_idx in range(num_samples):
                     typer.echo(f"\n🤖 版本 {sample_idx+1}/{num_samples} - 启动 Agent 工作流...")
                     
+                    # 对 HumanEval 题目，修改需求说明来指导 Coder
+                    humaneval_requirement = (
+                        requirement + "\n\n"
+                        "【重要说明】这是 HumanEval 编程题，请只生成要求的函数实现。\n"
+                        "- 不需要 main() 函数\n"
+                        "- 不需要测试代码\n"
+                        "- 只生成函数定义和必要的辅助函数\n"
+                        "- 确保函数名称与题目要求完全一致"
+                    )
+                    
                     # 调用完整的 agent 工作流
                     agent_result = solve(
-                        requirement=requirement,
+                        requirement=humaneval_requirement,
                         model_name=model_name,
                         max_iterations=max_iterations,
-                        enable_plan=enable_plan,
+                        enable_plan=False,  # HumanEval 单函数，不需要规划
                         project_name=task_id.replace('/', '_'),
                     )
                     
@@ -320,20 +330,29 @@ def run_all(
                         typer.echo(f"   ⚠️  Agent 未生成任何代码")
                         continue
                     
-                    # 找到主函数所在的文件（通常是 main.py 或包含 entry_point 的文件）
+                    # 找到主函数所在的文件（优先级：包含 entry_point → main.py → 第一个 py 文件）
                     completion = ""
+                    
+                    # 第一优先级：找包含目标函数的文件
                     for filename, code_content in generated_files.items():
                         if filename.endswith(".py") and filename != "__init__.py":
-                            # 检查是否包含目标函数
                             if f"def {entry_point}" in code_content:
                                 completion = code_content
                                 break
                     
-                    # 如果没找到，使用第一个非 __init__.py 的文件
+                    # 第二优先级：找 main.py
                     if not completion:
-                        for filename, code_content in generated_files.items():
+                        if "main.py" in generated_files:
+                            main_content = generated_files["main.py"]
+                            # 检查 main.py 中是否有目标函数（可能在 main.py 中定义）
+                            if f"def {entry_point}" in main_content:
+                                completion = main_content
+                    
+                    # 第三优先级：使用第一个非 __init__.py 的文件
+                    if not completion:
+                        for filename in sorted(generated_files.keys()):
                             if filename.endswith(".py") and filename != "__init__.py":
-                                completion = code_content
+                                completion = generated_files[filename]
                                 break
                     
                     if not completion:
@@ -399,8 +418,9 @@ def run_all(
                     code_lines = last_completion.split('\n')[:10]
                     for line in code_lines:
                         typer.echo(f"        {line}")
-                    if len(last_completion.split('\n')) > 10:
-                        typer.echo(f"        ... (共 {len(last_completion.split('\n'))} 行)")
+                    total_lines = len(last_completion.split('\n'))
+                    if total_lines > 10:
+                        typer.echo(f"        ... (共 {total_lines} 行)")
                 elif not task_passed:
                     typer.echo(f"\n   ❌ 所有 {num_samples} 个版本都未通过 HumanEval 官方测试")
                     typer.echo(f"      最后错误: {last_error[:300]}")
